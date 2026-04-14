@@ -1,0 +1,699 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>お小遣い管理</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Yu Gothic", sans-serif;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    min-height: 100vh;
+    padding: 16px;
+    color: #333;
+  }
+  .container { max-width: 900px; margin: 0 auto; }
+  h1 {
+    color: white;
+    text-align: center;
+    margin-bottom: 20px;
+    font-size: 28px;
+    text-shadow: 0 2px 4px rgba(0,0,0,0.2);
+  }
+  .card {
+    background: white;
+    border-radius: 16px;
+    padding: 20px;
+    margin-bottom: 16px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.12);
+  }
+  .card h2 { font-size: 18px; margin-bottom: 14px; color: #444; border-left: 4px solid #667eea; padding-left: 10px; }
+  .summary { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+  .summary-box { text-align: center; padding: 14px 8px; border-radius: 12px; }
+  .summary-box .label { font-size: 12px; color: #666; }
+  .summary-box .value { font-size: 20px; font-weight: bold; margin-top: 4px; }
+  .box-income { background: #e3f9e5; } .box-income .value { color: #1b8a2b; }
+  .box-expense { background: #fde8e8; } .box-expense .value { color: #c23030; }
+  .box-balance { background: #e3ecfa; } .box-balance .value { color: #1e4bc6; }
+  form { display: grid; gap: 10px; }
+  .row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  input, select, button {
+    padding: 10px 12px; font-size: 15px; border: 1px solid #ddd; border-radius: 8px; width: 100%;
+    font-family: inherit;
+  }
+  input:focus, select:focus { outline: none; border-color: #667eea; }
+  button {
+    background: #667eea; color: white; border: none; cursor: pointer; font-weight: bold;
+    transition: 0.2s;
+  }
+  button:hover { background: #5568d3; }
+  button.danger { background: #e55; }
+  button.danger:hover { background: #c33; }
+  button.small { padding: 5px 10px; font-size: 12px; width: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th, td { padding: 8px 6px; text-align: left; border-bottom: 1px solid #eee; }
+  th { background: #f7f7fb; font-size: 12px; color: #666; }
+  .tx-income { color: #1b8a2b; font-weight: bold; }
+  .tx-expense { color: #c23030; font-weight: bold; }
+  .tabs { display: flex; gap: 8px; margin-bottom: 16px; }
+  .tab {
+    flex: 1; padding: 10px; background: rgba(255,255,255,0.7); border-radius: 10px;
+    text-align: center; cursor: pointer; font-weight: bold; color: #555;
+  }
+  .tab.active { background: white; color: #667eea; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+  .hidden { display: none; }
+  .goal-item { border: 1px solid #eee; border-radius: 10px; padding: 12px; margin-bottom: 10px; }
+  .goal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+  .goal-name { font-weight: bold; }
+  .progress-bar { background: #eee; border-radius: 10px; height: 20px; overflow: hidden; margin-top: 6px; }
+  .progress-fill {
+    background: linear-gradient(90deg, #667eea, #764ba2);
+    height: 100%; display: flex; align-items: center; justify-content: center;
+    color: white; font-size: 11px; font-weight: bold; transition: width 0.4s;
+  }
+  .goal-info { font-size: 13px; color: #666; }
+  .empty { text-align: center; color: #999; padding: 20px; }
+  .sync-status {
+    background: rgba(255,255,255,0.9); padding: 8px 14px; border-radius: 20px;
+    font-size: 13px; text-align: center; margin-bottom: 12px; color: #555;
+  }
+  .sync-status.syncing { background: #fff3cd; color: #856404; }
+  .sync-status.synced { background: #d4edda; color: #155724; }
+  .sync-status.error { background: #f8d7da; color: #721c24; }
+  .overlay {
+    position: fixed; top:0; left:0; right:0; bottom:0;
+    background: rgba(0,0,0,0.6); display: flex; align-items: center; justify-content: center;
+    z-index: 100; padding: 20px;
+  }
+  .overlay .card { max-width: 400px; width: 100%; }
+
+  /* リッチローディングアニメーション */
+  .loader-overlay {
+    position: fixed; top:0; left:0; right:0; bottom:0;
+    background: linear-gradient(135deg, rgba(102,126,234,0.95), rgba(118,75,162,0.95));
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    z-index: 200; backdrop-filter: blur(10px);
+    transition: opacity 0.4s;
+  }
+  .loader-overlay.hide { opacity: 0; pointer-events: none; }
+  .loader-spinner {
+    width: 100px; height: 100px; position: relative;
+    margin-bottom: 24px;
+  }
+  .loader-ring {
+    position: absolute; inset: 0; border-radius: 50%;
+    border: 4px solid transparent;
+    border-top-color: #fff;
+    border-right-color: rgba(255,255,255,0.5);
+    animation: loader-spin 1.2s cubic-bezier(0.5, 0, 0.5, 1) infinite;
+  }
+  .loader-ring:nth-child(2) {
+    inset: 12px;
+    border-top-color: #ffd700;
+    border-right-color: rgba(255,215,0,0.4);
+    animation-duration: 0.9s; animation-direction: reverse;
+  }
+  .loader-ring:nth-child(3) {
+    inset: 24px;
+    border-top-color: #ff9a8b;
+    animation-duration: 1.5s;
+  }
+  .loader-coin {
+    position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+    font-size: 32px; animation: loader-bounce 1s ease-in-out infinite;
+  }
+  @keyframes loader-spin { to { transform: rotate(360deg); } }
+  @keyframes loader-bounce {
+    0%, 100% { transform: translateY(0) scale(1); }
+    50% { transform: translateY(-6px) scale(1.08); }
+  }
+  .loader-text {
+    color: white; font-size: 18px; font-weight: bold; letter-spacing: 0.05em;
+    text-shadow: 0 2px 8px rgba(0,0,0,0.2);
+  }
+  .loader-dots::after {
+    content: ""; animation: loader-dots 1.4s steps(4, end) infinite;
+  }
+  @keyframes loader-dots {
+    0% { content: ""; } 25% { content: "."; }
+    50% { content: ".."; } 75% { content: "..."; }
+  }
+  .loader-sub {
+    margin-top: 10px; color: rgba(255,255,255,0.8); font-size: 13px;
+  }
+  .loader-particles {
+    position: absolute; inset: 0; overflow: hidden; pointer-events: none;
+  }
+  .particle {
+    position: absolute; font-size: 20px; opacity: 0;
+    animation: particle-float 4s ease-in-out infinite;
+  }
+  @keyframes particle-float {
+    0% { transform: translateY(110vh) translateX(0); opacity: 0; }
+    10% { opacity: 0.8; }
+    90% { opacity: 0.8; }
+    100% { transform: translateY(-20vh) translateX(30px); opacity: 0; }
+  }
+  @media (max-width: 500px) {
+    .summary { grid-template-columns: 1fr; }
+    .row { grid-template-columns: 1fr; }
+    .summary-box .value { font-size: 18px; }
+  }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>💰 お小遣い管理</h1>
+
+  <div class="sync-status" id="sync-status">読み込み中...</div>
+
+  <div class="card">
+    <h2>今月のサマリー</h2>
+    <div class="summary">
+      <div class="summary-box box-income">
+        <div class="label">収入</div>
+        <div class="value" id="sum-income">¥0</div>
+      </div>
+      <div class="summary-box box-expense">
+        <div class="label">支出</div>
+        <div class="value" id="sum-expense">¥0</div>
+      </div>
+      <div class="summary-box box-balance">
+        <div class="label">残高</div>
+        <div class="value" id="sum-balance">¥0</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="tabs">
+    <div class="tab active" data-tab="tx">記録</div>
+    <div class="tab" data-tab="goals">貯金目標</div>
+    <div class="tab" data-tab="graph">グラフ</div>
+  </div>
+
+  <div id="tab-tx">
+    <div class="card">
+      <h2>新しい記録を追加</h2>
+      <form id="tx-form">
+        <div class="row">
+          <select id="tx-type" required>
+            <option value="expense">支出</option>
+            <option value="income">収入</option>
+          </select>
+          <input type="date" id="tx-date" required>
+        </div>
+        <div class="row">
+          <select id="tx-category" required></select>
+          <input type="number" id="tx-amount" placeholder="金額" min="1" required>
+        </div>
+        <input type="text" id="tx-memo" placeholder="メモ(任意)">
+        <button type="submit">追加する</button>
+      </form>
+    </div>
+    <div class="card">
+      <h2>履歴</h2>
+      <div id="tx-list"></div>
+    </div>
+  </div>
+
+  <div id="tab-goals" class="hidden">
+    <div class="card">
+      <h2>新しい貯金目標</h2>
+      <form id="goal-form">
+        <input type="text" id="goal-name" placeholder="例: ゲーム機" required>
+        <div class="row">
+          <input type="number" id="goal-amount" placeholder="目標金額" min="1" required>
+          <input type="number" id="goal-saved" placeholder="現在の貯金額" min="0" value="0">
+        </div>
+        <button type="submit">目標を追加</button>
+      </form>
+    </div>
+    <div class="card">
+      <h2>目標一覧</h2>
+      <div id="goal-list"></div>
+    </div>
+  </div>
+
+  <div id="tab-graph" class="hidden">
+    <div class="card">
+      <h2>月次収支グラフ</h2>
+      <canvas id="monthly-chart" height="200"></canvas>
+    </div>
+    <div class="card">
+      <h2>今月のカテゴリ別支出</h2>
+      <canvas id="category-chart" height="200"></canvas>
+    </div>
+  </div>
+
+  <div class="card" style="text-align:center; display:flex; gap:8px; justify-content:center; flex-wrap:wrap;">
+    <button class="small" id="change-code-btn">同期コード変更</button>
+    <button class="small danger" id="reset-btn">全データをリセット</button>
+  </div>
+</div>
+
+<!-- リッチローディング -->
+<div class="loader-overlay hide" id="loader">
+  <div class="loader-particles" id="loader-particles"></div>
+  <div class="loader-spinner">
+    <div class="loader-ring"></div>
+    <div class="loader-ring"></div>
+    <div class="loader-ring"></div>
+    <div class="loader-coin">💰</div>
+  </div>
+  <div class="loader-text">接続中<span class="loader-dots"></span></div>
+  <div class="loader-sub" id="loader-sub">クラウドからデータを読み込んでいます</div>
+</div>
+
+<!-- 同期コード入力ダイアログ -->
+<div class="overlay" id="code-overlay">
+  <div class="card">
+    <h2>同期コードを入力</h2>
+    <p style="font-size:13px; color:#666; margin-bottom:12px;">
+      初めて使う場合は好きなコード（英数字4文字以上）を入力してください。<br>
+      iPhoneなど別デバイスで同じコードを入力すると、同じデータが同期されます。
+    </p>
+    <form id="code-form">
+      <input type="text" id="code-input" placeholder="例: taiki1234" minlength="4" required
+             autocapitalize="off" autocorrect="off" spellcheck="false">
+      <button type="submit">スタート</button>
+    </form>
+  </div>
+</div>
+
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+import {
+  initializeFirestore, doc, setDoc, onSnapshot, getDocFromServer, getDoc
+} from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+
+const firebaseConfig = {
+  apiKey: "AIzaSyDZOvWMtjwvPB_i9-1SO6eBVfIozN3qZJI",
+  authDomain: "moneytracker-c911d.firebaseapp.com",
+  projectId: "moneytracker-c911d",
+  storageBucket: "moneytracker-c911d.firebasestorage.app",
+  messagingSenderId: "1013451417143",
+  appId: "1:1013451417143:web:90f3e87b2423d8f23301b2"
+};
+const app = initializeApp(firebaseConfig);
+// file:// や制限環境でも動くようにlong-pollingを有効化
+const db = initializeFirestore(app, {
+  experimentalAutoDetectLongPolling: true,
+  useFetchStreams: false
+});
+
+const CATEGORIES = {
+  expense: ["食費", "交通費", "趣味・娯楽", "書籍・学用品", "服・美容", "交際費", "その他"],
+  income:  ["お小遣い", "お年玉", "バイト", "その他"]
+};
+
+let state = { transactions: [], goals: [] };
+let syncCode = localStorage.getItem("okozukai_code") || "";
+let unsubscribe = null;
+let saveTimer = null;
+let isApplyingRemote = false;
+let isLoaded = false;  // サーバーから最初のデータ受信後にtrue
+let lastKnownUpdatedAt = 0; // サーバー上の既知の最新タイムスタンプ
+const CLIENT_ID = (() => {
+  let id = localStorage.getItem("okozukai_client_id");
+  if (!id) { id = Math.random().toString(36).slice(2) + Date.now().toString(36); localStorage.setItem("okozukai_client_id", id); }
+  return id;
+})();
+
+function backupKey() { return "okozukai_backup_" + syncCode; }
+function saveLocalBackup() {
+  if (!syncCode) return;
+  try {
+    localStorage.setItem(backupKey(), JSON.stringify({
+      transactions: state.transactions, goals: state.goals,
+      savedAt: Date.now(), updatedAt: lastKnownUpdatedAt
+    }));
+  } catch {}
+}
+function loadLocalBackup() {
+  try {
+    const raw = localStorage.getItem(backupKey());
+    if (!raw) return null;
+    return JSON.parse(raw);
+  } catch { return null; }
+}
+
+// ローダー制御
+function showLoader(subText) {
+  const l = document.getElementById("loader");
+  l.classList.remove("hide");
+  if (subText) document.getElementById("loader-sub").textContent = subText;
+  spawnParticles();
+}
+function hideLoader() {
+  document.getElementById("loader").classList.add("hide");
+}
+function spawnParticles() {
+  const container = document.getElementById("loader-particles");
+  container.innerHTML = "";
+  const emojis = ["💰","💵","🪙","✨","💴"];
+  for (let i = 0; i < 12; i++) {
+    const p = document.createElement("div");
+    p.className = "particle";
+    p.textContent = emojis[i % emojis.length];
+    p.style.left = Math.random() * 100 + "%";
+    p.style.animationDelay = (Math.random() * 4) + "s";
+    p.style.animationDuration = (3 + Math.random() * 2) + "s";
+    p.style.fontSize = (16 + Math.random() * 16) + "px";
+    container.appendChild(p);
+  }
+}
+
+const fmt = n => "¥" + Number(n).toLocaleString();
+const ym = d => d.slice(0,7);
+const thisMonth = () => new Date().toISOString().slice(0,7);
+
+function setStatus(text, cls="") {
+  const el = document.getElementById("sync-status");
+  el.textContent = text;
+  el.className = "sync-status " + cls;
+}
+
+// 同期コード入力
+function showCodeDialog() {
+  document.getElementById("code-overlay").style.display = "flex";
+  document.getElementById("code-input").value = syncCode;
+  document.getElementById("code-input").focus();
+}
+function hideCodeDialog() {
+  document.getElementById("code-overlay").style.display = "none";
+}
+
+document.getElementById("code-form").addEventListener("submit", e => {
+  e.preventDefault();
+  const code = document.getElementById("code-input").value.trim().toLowerCase();
+  if (code.length < 4) return;
+  syncCode = code;
+  localStorage.setItem("okozukai_code", code);
+  hideCodeDialog();
+  startSync();
+});
+
+document.getElementById("change-code-btn").addEventListener("click", () => {
+  if (unsubscribe) unsubscribe();
+  isLoaded = false;
+  showCodeDialog();
+});
+
+// Firestoreと同期開始 - 安全な初期化
+async function startSync() {
+  isLoaded = false;
+  lastKnownUpdatedAt = 0;
+  showLoader("クラウドからデータを読み込んでいます");
+  setStatus("接続中...", "syncing");
+  const ref = doc(db, "users", syncCode);
+
+  try {
+    // 【重要】サーバーから確実に取得（キャッシュを信頼しない）
+    const snap = await getDocFromServer(ref);
+
+    if (snap.exists()) {
+      const data = snap.data();
+      isApplyingRemote = true;
+      state.transactions = Array.isArray(data.transactions) ? data.transactions : [];
+      state.goals = Array.isArray(data.goals) ? data.goals : [];
+      lastKnownUpdatedAt = Number(data.updatedAt) || 0;
+      isApplyingRemote = false;
+    } else {
+      // 【新規作成】 - サーバー上に存在しないことが確認できた時のみ
+      document.getElementById("loader-sub").textContent = "新しいデータを準備中";
+      const now = Date.now();
+      await setDoc(ref, {
+        transactions: [], goals: [], updatedAt: now, createdBy: CLIENT_ID
+      });
+      state.transactions = [];
+      state.goals = [];
+      lastKnownUpdatedAt = now;
+    }
+
+    isLoaded = true;
+    saveLocalBackup();
+    render();
+    setStatus("✓ 同期済み (コード: " + syncCode + ")", "synced");
+    hideLoader();
+
+    // リアルタイム購読（以降の他デバイスからの更新を反映）
+    unsubscribe = onSnapshot(ref, snap => {
+      // 安全チェック1: ドキュメントが存在しないスナップショットは無視
+      if (!snap.exists()) return;
+      // 安全チェック2: 自分の書き込みが跳ね返ってきた場合は無視
+      if (snap.metadata.hasPendingWrites) return;
+      // 安全チェック3: オフラインキャッシュからの再発火は無視
+      if (snap.metadata.fromCache) return;
+
+      const data = snap.data();
+      const remoteUpdatedAt = Number(data.updatedAt) || 0;
+      // 安全チェック4: 自分が知ってる最新より古いデータは無視
+      if (remoteUpdatedAt <= lastKnownUpdatedAt) return;
+      // 安全チェック5: 配列型でなければ無視
+      if (!Array.isArray(data.transactions) || !Array.isArray(data.goals)) return;
+
+      isApplyingRemote = true;
+      state.transactions = data.transactions;
+      state.goals = data.goals;
+      lastKnownUpdatedAt = remoteUpdatedAt;
+      isApplyingRemote = false;
+      saveLocalBackup();
+      render();
+      setStatus("✓ 他デバイスから更新を受信", "synced");
+    }, err => {
+      console.error(err);
+      setStatus("⚠ 同期中エラー: " + err.message + "（ローカルは維持）", "error");
+    });
+
+  } catch (e) {
+    console.error("初期読み込み失敗", e);
+    setStatus("⚠ 読み込み失敗: " + e.message + " - 書き込みは無効", "error");
+    // 【重要】読み込み失敗時はisLoaded=falseのまま → save()がブロックされ、絶対に上書きしない
+    // ローカルバックアップを表示のみに使う
+    const backup = loadLocalBackup();
+    if (backup) {
+      state.transactions = backup.transactions || [];
+      state.goals = backup.goals || [];
+      render();
+      setStatus("⚠ オフライン表示 - 書き込みは停止中", "error");
+    }
+    hideLoader();
+    // 5秒後に再試行
+    setTimeout(() => { if (!isLoaded && syncCode) startSync(); }, 5000);
+  }
+}
+
+// データ保存（デバウンス付き、多重安全策）
+function save() {
+  if (isApplyingRemote) return;
+  // 【超重要】サーバーから読み込み完了する前は絶対に書き込まない
+  if (!isLoaded) {
+    setStatus("⚠ 読み込み未完了のため保存せず", "error");
+    return;
+  }
+  if (!syncCode) return;
+  // ローカルバックアップは毎回即座に保存
+  saveLocalBackup();
+  setStatus("保存中...", "syncing");
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(async () => {
+    try {
+      const now = Date.now();
+      await setDoc(doc(db, "users", syncCode), {
+        transactions: state.transactions,
+        goals: state.goals,
+        updatedAt: now,
+        lastClientId: CLIENT_ID
+      });
+      lastKnownUpdatedAt = now;
+      setStatus("✓ 同期済み (コード: " + syncCode + ")", "synced");
+    } catch (e) {
+      setStatus("⚠ 保存失敗(ローカルには保持): " + e.message, "error");
+    }
+  }, 400);
+}
+
+// タブ切り替え
+document.querySelectorAll(".tab").forEach(t => {
+  t.addEventListener("click", () => {
+    document.querySelectorAll(".tab").forEach(x => x.classList.remove("active"));
+    t.classList.add("active");
+    ["tx","goals","graph"].forEach(n =>
+      document.getElementById("tab-"+n).classList.toggle("hidden", n !== t.dataset.tab)
+    );
+    if (t.dataset.tab === "graph") renderCharts();
+  });
+});
+
+function updateCategories() {
+  const type = document.getElementById("tx-type").value;
+  const sel = document.getElementById("tx-category");
+  sel.innerHTML = CATEGORIES[type].map(c => `<option>${c}</option>`).join("");
+}
+document.getElementById("tx-type").addEventListener("change", updateCategories);
+updateCategories();
+document.getElementById("tx-date").value = new Date().toISOString().slice(0,10);
+
+document.getElementById("tx-form").addEventListener("submit", e => {
+  e.preventDefault();
+  state.transactions.push({
+    id: Date.now(),
+    type: document.getElementById("tx-type").value,
+    date: document.getElementById("tx-date").value,
+    category: document.getElementById("tx-category").value,
+    amount: Number(document.getElementById("tx-amount").value),
+    memo: document.getElementById("tx-memo").value
+  });
+  save();
+  document.getElementById("tx-form").reset();
+  document.getElementById("tx-date").value = new Date().toISOString().slice(0,10);
+  updateCategories();
+  render();
+});
+
+window.deleteTx = function(id) {
+  if (!confirm("削除しますか?")) return;
+  state.transactions = state.transactions.filter(t => t.id !== id);
+  save(); render();
+};
+
+document.getElementById("goal-form").addEventListener("submit", e => {
+  e.preventDefault();
+  state.goals.push({
+    id: Date.now(),
+    name: document.getElementById("goal-name").value,
+    amount: Number(document.getElementById("goal-amount").value),
+    saved: Number(document.getElementById("goal-saved").value) || 0
+  });
+  save();
+  e.target.reset();
+  render();
+});
+
+window.addGoalSaving = function(id) {
+  const amt = Number(prompt("追加する貯金額"));
+  if (!amt) return;
+  const g = state.goals.find(x => x.id === id);
+  g.saved += amt;
+  save(); render();
+};
+window.deleteGoal = function(id) {
+  if (!confirm("目標を削除しますか?")) return;
+  state.goals = state.goals.filter(g => g.id !== id);
+  save(); render();
+};
+
+document.getElementById("reset-btn").addEventListener("click", () => {
+  if (!confirm("本当に全データを削除しますか?")) return;
+  state = {transactions:[], goals:[]};
+  save(); render();
+});
+
+function render() {
+  const tm = thisMonth();
+  const monthTx = state.transactions.filter(t => ym(t.date) === tm);
+  const income = monthTx.filter(t => t.type === "income").reduce((s,t) => s+t.amount, 0);
+  const expense = monthTx.filter(t => t.type === "expense").reduce((s,t) => s+t.amount, 0);
+  document.getElementById("sum-income").textContent = fmt(income);
+  document.getElementById("sum-expense").textContent = fmt(expense);
+  document.getElementById("sum-balance").textContent = fmt(income - expense);
+
+  const list = document.getElementById("tx-list");
+  if (state.transactions.length === 0) {
+    list.innerHTML = '<div class="empty">まだ記録がありません</div>';
+  } else {
+    const sorted = [...state.transactions].sort((a,b) => b.date.localeCompare(a.date) || b.id - a.id);
+    list.innerHTML = `<table>
+      <tr><th>日付</th><th>カテゴリ</th><th>金額</th><th>メモ</th><th></th></tr>
+      ${sorted.map(t => `
+        <tr>
+          <td>${t.date.slice(5)}</td>
+          <td>${t.category}</td>
+          <td class="tx-${t.type}">${t.type==="income"?"+":"-"}${fmt(t.amount)}</td>
+          <td>${t.memo||""}</td>
+          <td><button class="small danger" onclick="deleteTx(${t.id})">×</button></td>
+        </tr>`).join("")}
+    </table>`;
+  }
+
+  const gl = document.getElementById("goal-list");
+  if (state.goals.length === 0) {
+    gl.innerHTML = '<div class="empty">目標がまだありません</div>';
+  } else {
+    gl.innerHTML = state.goals.map(g => {
+      const pct = Math.min(100, Math.round(g.saved/g.amount*100));
+      return `<div class="goal-item">
+        <div class="goal-header">
+          <span class="goal-name">${g.name}</span>
+          <span>
+            <button class="small" onclick="addGoalSaving(${g.id})">+貯金</button>
+            <button class="small danger" onclick="deleteGoal(${g.id})">削除</button>
+          </span>
+        </div>
+        <div class="goal-info">${fmt(g.saved)} / ${fmt(g.amount)} (残り${fmt(Math.max(0,g.amount-g.saved))})</div>
+        <div class="progress-bar"><div class="progress-fill" style="width:${pct}%">${pct}%</div></div>
+      </div>`;
+    }).join("");
+  }
+}
+
+let monthlyChart, categoryChart;
+function renderCharts() {
+  const months = {};
+  state.transactions.forEach(t => {
+    const m = ym(t.date);
+    if (!months[m]) months[m] = {income:0, expense:0};
+    months[m][t.type] += t.amount;
+  });
+  const keys = Object.keys(months).sort().slice(-6);
+  if (monthlyChart) monthlyChart.destroy();
+  monthlyChart = new Chart(document.getElementById("monthly-chart"), {
+    type: "bar",
+    data: {
+      labels: keys,
+      datasets: [
+        {label:"収入", data: keys.map(k => months[k].income), backgroundColor:"#1b8a2b"},
+        {label:"支出", data: keys.map(k => months[k].expense), backgroundColor:"#c23030"}
+      ]
+    },
+    options: {responsive:true}
+  });
+
+  const tm = thisMonth();
+  const cats = {};
+  state.transactions.filter(t => t.type==="expense" && ym(t.date)===tm).forEach(t => {
+    cats[t.category] = (cats[t.category]||0) + t.amount;
+  });
+  if (categoryChart) categoryChart.destroy();
+  const catKeys = Object.keys(cats);
+  if (catKeys.length === 0) {
+    document.getElementById("category-chart").style.display = "none";
+  } else {
+    document.getElementById("category-chart").style.display = "block";
+    categoryChart = new Chart(document.getElementById("category-chart"), {
+      type: "doughnut",
+      data: {
+        labels: catKeys,
+        datasets: [{
+          data: catKeys.map(k => cats[k]),
+          backgroundColor: ["#667eea","#764ba2","#f093fb","#4facfe","#43e97b","#fa709a","#feb47b"]
+        }]
+      },
+      options: {responsive:true}
+    });
+  }
+}
+
+// 起動
+if (syncCode) {
+  hideCodeDialog();
+  startSync();
+} else {
+  showCodeDialog();
+}
+render();
+</script>
+</body>
+</html>
