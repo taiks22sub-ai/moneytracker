@@ -156,10 +156,29 @@
     90% { opacity: 0.8; }
     100% { transform: translateY(-20vh) translateX(30px); opacity: 0; }
   }
+  /* ウォレット残高 */
+  .wallet-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+  .wallet-box { text-align: center; padding: 14px 8px; border-radius: 12px; cursor: pointer; position: relative; }
+  .wallet-box .w-icon { font-size: 22px; }
+  .wallet-box .w-label { font-size: 12px; color: #666; margin-top: 2px; }
+  .wallet-box .w-value { font-size: 18px; font-weight: bold; margin-top: 4px; }
+  .wallet-box .w-adj-btn { font-size: 10px; color: #999; text-decoration: underline; cursor: pointer; margin-top: 4px; display: block; }
+  .box-cash { background: #e3f9e5; } .box-cash .w-value { color: #1b8a2b; }
+  .box-pasmo { background: #e3f0fa; } .box-pasmo .w-value { color: #1b5fa8; }
+  .box-paypay { background: #fde8e8; } .box-paypay .w-value { color: #c23030; }
+  .wallet-badge { display: inline-block; font-size: 11px; padding: 1px 6px; border-radius: 8px; font-weight: bold; white-space: nowrap; }
+  .badge-cash { background: #e3f9e5; color: #1b8a2b; }
+  .badge-pasmo { background: #e3f0fa; color: #1b5fa8; }
+  .badge-paypay { background: #fde8e8; color: #c23030; }
+  /* 残高調整モーダル */
+  .adj-overlay { position:fixed; top:0;left:0;right:0;bottom:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:150; padding:20px; }
+  .adj-card { background:white; border-radius:16px; padding:24px; max-width:340px; width:100%; box-shadow:0 8px 32px rgba(0,0,0,0.2); }
+  .adj-card h3 { font-size:16px; margin-bottom:12px; color:#444; border-left:4px solid #667eea; padding-left:10px; }
   @media (max-width: 500px) {
     .summary { grid-template-columns: 1fr; }
     .row { grid-template-columns: 1fr; }
     .summary-box .value { font-size: 18px; }
+    .wallet-grid { grid-template-columns: 1fr; }
   }
 </style>
 </head>
@@ -168,6 +187,12 @@
   <h1>💰 お小遣い管理</h1>
 
   <div class="sync-status" id="sync-status">読み込み中...</div>
+
+  <!-- ウォレット残高カード -->
+  <div class="card">
+    <h2>残高</h2>
+    <div class="wallet-grid" id="wallet-grid"></div>
+  </div>
 
   <div class="card">
     <h2>今月のサマリー</h2>
@@ -208,6 +233,11 @@
           <select id="tx-category" required></select>
           <input type="number" id="tx-amount" placeholder="金額" min="1" required>
         </div>
+        <select id="tx-wallet" required>
+          <option value="cash">💴 現金</option>
+          <option value="pasmo">🚃 PASMO</option>
+          <option value="paypay">📱 PayPay</option>
+        </select>
         <input type="text" id="tx-memo" placeholder="メモ(任意)">
         <button type="submit">追加する</button>
       </form>
@@ -250,6 +280,23 @@
   <div class="card" style="text-align:center; display:flex; gap:8px; justify-content:center; flex-wrap:wrap;">
     <button class="small" id="change-code-btn">同期コード変更</button>
     <button class="small danger" id="reset-btn">全データをリセット</button>
+  </div>
+</div>
+
+<!-- 残高調整モーダル -->
+<div class="adj-overlay" id="adj-overlay" style="display:none;">
+  <div class="adj-card">
+    <h3 id="adj-title">残高を調整</h3>
+    <p style="font-size:13px; color:#666; margin-bottom:12px;">
+      現在の実際の残高を入力してください。取引履歴との差分を「初期調整額」として自動計算します。
+    </p>
+    <form id="adj-form">
+      <input type="number" id="adj-amount" placeholder="現在の残高（例: 3500）" min="0" required style="margin-bottom:10px; display:block; width:100%; padding:10px; border:1px solid #ddd; border-radius:8px; font-size:15px;">
+      <div style="display:flex; gap:8px;">
+        <button type="submit" style="flex:1; padding:10px; background:#667eea; color:white; border:none; border-radius:8px; font-size:15px; font-weight:bold; cursor:pointer;">設定する</button>
+        <button type="button" id="adj-cancel" style="flex:1; padding:10px; background:#eee; color:#555; border:none; border-radius:8px; font-size:15px; cursor:pointer;">キャンセル</button>
+      </div>
+    </form>
   </div>
 </div>
 
@@ -305,10 +352,16 @@ const db = initializeFirestore(app, {
 
 const CATEGORIES = {
   expense: ["食費", "交通費", "趣味・娯楽", "書籍・学用品", "服・美容", "交際費", "その他"],
-  income:  ["お小遣い", "お年玉", "バイト", "その他"]
+  income:  ["お小遣い", "お年玉", "バイト", "チャージ", "その他"]
 };
 
-let state = { transactions: [], goals: [] };
+const WALLETS = [
+  { id: "cash",   label: "現金",  icon: "💴", cls: "box-cash",   badge: "badge-cash"   },
+  { id: "pasmo",  label: "PASMO", icon: "🚃", cls: "box-pasmo",  badge: "badge-pasmo"  },
+  { id: "paypay", label: "PayPay",icon: "📱", cls: "box-paypay", badge: "badge-paypay" }
+];
+
+let state = { transactions: [], goals: [], walletAdjustments: {cash:0, pasmo:0, paypay:0} };
 let syncCode = localStorage.getItem("okozukai_code") || "";
 let unsubscribe = null;
 let saveTimer = null;
@@ -327,6 +380,7 @@ function saveLocalBackup() {
   try {
     localStorage.setItem(backupKey(), JSON.stringify({
       transactions: state.transactions, goals: state.goals,
+      walletAdjustments: state.walletAdjustments,
       savedAt: Date.now(), updatedAt: lastKnownUpdatedAt
     }));
   } catch {}
@@ -418,6 +472,7 @@ async function startSync() {
       isApplyingRemote = true;
       state.transactions = Array.isArray(data.transactions) ? data.transactions : [];
       state.goals = Array.isArray(data.goals) ? data.goals : [];
+      state.walletAdjustments = data.walletAdjustments || {cash:0, pasmo:0, paypay:0};
       lastKnownUpdatedAt = Number(data.updatedAt) || 0;
       isApplyingRemote = false;
     } else {
@@ -457,6 +512,7 @@ async function startSync() {
       isApplyingRemote = true;
       state.transactions = data.transactions;
       state.goals = data.goals;
+      state.walletAdjustments = data.walletAdjustments || {cash:0, pasmo:0, paypay:0};
       lastKnownUpdatedAt = remoteUpdatedAt;
       isApplyingRemote = false;
       saveLocalBackup();
@@ -476,6 +532,7 @@ async function startSync() {
     if (backup) {
       state.transactions = backup.transactions || [];
       state.goals = backup.goals || [];
+      state.walletAdjustments = backup.walletAdjustments || {cash:0, pasmo:0, paypay:0};
       render();
       setStatus("⚠ オフライン表示 - 書き込みは停止中", "error");
     }
@@ -504,6 +561,7 @@ function save() {
       await setDoc(doc(db, "users", syncCode), {
         transactions: state.transactions,
         goals: state.goals,
+        walletAdjustments: state.walletAdjustments,
         updatedAt: now,
         lastClientId: CLIENT_ID
       });
@@ -544,11 +602,13 @@ document.getElementById("tx-form").addEventListener("submit", e => {
     date: document.getElementById("tx-date").value,
     category: document.getElementById("tx-category").value,
     amount: Number(document.getElementById("tx-amount").value),
+    wallet: document.getElementById("tx-wallet").value,
     memo: document.getElementById("tx-memo").value
   });
   save();
   document.getElementById("tx-form").reset();
   document.getElementById("tx-date").value = new Date().toISOString().slice(0,10);
+  document.getElementById("tx-wallet").value = "cash";
   updateCategories();
   render();
 });
@@ -587,7 +647,7 @@ window.deleteGoal = function(id) {
 
 document.getElementById("reset-btn").addEventListener("click", () => {
   if (!confirm("本当に全データを削除しますか?")) return;
-  state = {transactions:[], goals:[]};
+  state = {transactions:[], goals:[], walletAdjustments:{cash:0, pasmo:0, paypay:0}};
   save(); render();
 });
 
@@ -600,21 +660,37 @@ function render() {
   document.getElementById("sum-expense").textContent = fmt(expense);
   document.getElementById("sum-balance").textContent = fmt(income - expense);
 
+  // ウォレット残高カード
+  const walletGrid = document.getElementById("wallet-grid");
+  walletGrid.innerHTML = WALLETS.map(w => {
+    const bal = getWalletBalance(w.id);
+    const neg = bal < 0;
+    return `<div class="wallet-box ${w.cls}" onclick="openAdjust('${w.id}')">
+      <div class="w-icon">${w.icon}</div>
+      <div class="w-label">${w.label}</div>
+      <div class="w-value" style="${neg?"color:#c23030":""}">${fmt(bal)}</div>
+      <span class="w-adj-btn">残高を調整</span>
+    </div>`;
+  }).join("");
+
   const list = document.getElementById("tx-list");
   if (state.transactions.length === 0) {
     list.innerHTML = '<div class="empty">まだ記録がありません</div>';
   } else {
     const sorted = [...state.transactions].sort((a,b) => b.date.localeCompare(a.date) || b.id - a.id);
     list.innerHTML = `<table>
-      <tr><th>日付</th><th>カテゴリ</th><th>金額</th><th>メモ</th><th></th></tr>
-      ${sorted.map(t => `
-        <tr>
+      <tr><th>日付</th><th>カテゴリ</th><th>支払</th><th>金額</th><th>メモ</th><th></th></tr>
+      ${sorted.map(t => {
+        const w = WALLETS.find(x => x.id === (t.wallet||"cash")) || WALLETS[0];
+        return `<tr>
           <td>${t.date.slice(5)}</td>
           <td>${t.category}</td>
+          <td><span class="wallet-badge ${w.badge}">${w.icon}${w.label}</span></td>
           <td class="tx-${t.type}">${t.type==="income"?"+":"-"}${fmt(t.amount)}</td>
           <td>${t.memo||""}</td>
           <td><button class="small danger" onclick="deleteTx(${t.id})">×</button></td>
-        </tr>`).join("")}
+        </tr>`;
+      }).join("")}
     </table>`;
   }
 
@@ -638,6 +714,43 @@ function render() {
     }).join("");
   }
 }
+
+// ウォレット残高計算
+function getWalletBalance(walletId) {
+  const adj = (state.walletAdjustments && state.walletAdjustments[walletId]) || 0;
+  const txs = state.transactions.filter(t => (t.wallet || "cash") === walletId);
+  const income  = txs.filter(t => t.type === "income" ).reduce((s,t) => s+t.amount, 0);
+  const expense = txs.filter(t => t.type === "expense").reduce((s,t) => s+t.amount, 0);
+  return adj + income - expense;
+}
+
+// 残高調整モーダル
+let adjTarget = null;
+window.openAdjust = function(walletId) {
+  adjTarget = walletId;
+  const w = WALLETS.find(x => x.id === walletId);
+  document.getElementById("adj-title").textContent = `${w.icon} ${w.label}の残高を調整`;
+  document.getElementById("adj-amount").value = Math.max(0, getWalletBalance(walletId));
+  document.getElementById("adj-overlay").style.display = "flex";
+  document.getElementById("adj-amount").focus();
+};
+document.getElementById("adj-cancel").addEventListener("click", () => {
+  document.getElementById("adj-overlay").style.display = "none";
+});
+document.getElementById("adj-form").addEventListener("submit", e => {
+  e.preventDefault();
+  if (!adjTarget) return;
+  const targetBalance = Number(document.getElementById("adj-amount").value);
+  // 取引履歴分（調整抜き）を計算して差分を求める
+  const txs = state.transactions.filter(t => (t.wallet || "cash") === adjTarget);
+  const income  = txs.filter(t => t.type === "income" ).reduce((s,t) => s+t.amount, 0);
+  const expense = txs.filter(t => t.type === "expense").reduce((s,t) => s+t.amount, 0);
+  const txNet = income - expense;
+  if (!state.walletAdjustments) state.walletAdjustments = {cash:0, pasmo:0, paypay:0};
+  state.walletAdjustments[adjTarget] = targetBalance - txNet;
+  document.getElementById("adj-overlay").style.display = "none";
+  save(); render();
+});
 
 let monthlyChart, categoryChart;
 function renderCharts() {
